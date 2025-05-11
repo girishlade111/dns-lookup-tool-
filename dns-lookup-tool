@@ -1,0 +1,207 @@
+import { useState } from 'react'
+import { Button } from "/components/ui/button"
+import { Input } from "/components/ui/input"
+import { Label } from "/components/ui/label"
+import { Card, CardContent, CardHeader, CardTitle } from "/components/ui/card"
+import { Loader2 } from "lucide-react"
+
+type DnsRecord = {
+  type: string
+  value: string
+  ttl?: number
+}
+
+export default function DnsLookupTool() {
+  const [domain, setDomain] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [records, setRecords] = useState<DnsRecord[]>([])
+  const [searchedDomain, setSearchedDomain] = useState('')
+
+  const validateDomain = (input: string): boolean => {
+    // Remove protocol if present
+    const cleanedInput = input.replace(/^https?:\/\//, '')
+    // Remove path and query parameters if present
+    const domainOnly = cleanedInput.split('/')[0]
+    // Simple domain validation regex
+    const pattern = /^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}$/i
+    return pattern.test(domainOnly)
+  }
+
+  const cleanDomainInput = (input: string): string => {
+    return input.replace(/^https?:\/\//, '').split('/')[0]
+  }
+
+  const fetchDnsRecords = async () => {
+    const cleanedDomain = cleanDomainInput(domain)
+    
+    if (!cleanedDomain) {
+      setError('Please enter a domain name')
+      return
+    }
+
+    if (!validateDomain(cleanedDomain)) {
+      setError('Please enter a valid domain name (e.g., example.com)')
+      return
+    }
+
+    setIsLoading(true)
+    setError('')
+    setSearchedDomain(cleanedDomain)
+
+    try {
+      // Using Google's DNS-over-HTTPS API
+      const apiUrl = `https://dns.google/resolve?name=${cleanedDomain}&type=A&type=AAAA&type=MX&type=TXT&type=NS&type=SOA`
+      
+      const response = await fetch(apiUrl)
+      const data = await response.json()
+
+      if (data.Status !== 0) {
+        throw new Error(data.Comment || 'DNS query failed')
+      }
+
+      const allRecords: DnsRecord[] = []
+
+      // Process each type of record
+      if (data.Answer) {
+        data.Answer.forEach((record: any) => {
+          switch (record.type) {
+            case 1: // A record
+              allRecords.push({ type: 'A', value: record.data, ttl: record.TTL })
+              break
+            case 28: // AAAA record
+              allRecords.push({ type: 'AAAA', value: record.data, ttl: record.TTL })
+              break
+            case 15: // MX record
+              allRecords.push({ type: 'MX', value: record.data, ttl: record.TTL })
+              break
+            case 16: // TXT record
+              allRecords.push({ type: 'TXT', value: record.data.replace(/"/g, ''), ttl: record.TTL })
+              break
+            case 2: // NS record
+              allRecords.push({ type: 'NS', value: record.data, ttl: record.TTL })
+              break
+            case 6: // SOA record
+              allRecords.push({ type: 'SOA', value: record.data, ttl: record.TTL })
+              break
+          }
+        })
+      }
+
+      if (allRecords.length === 0) {
+        setError('No DNS records found for this domain')
+      } else {
+        setRecords(allRecords)
+      }
+    } catch (err) {
+      console.error('DNS lookup error:', err)
+      setError('Failed to fetch DNS records. Please try again.')
+      setRecords([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const getRecordColor = (type: string): string => {
+    const colors: Record<string, string> = {
+      A: 'bg-blue-100 text-blue-800',
+      AAAA: 'bg-purple-100 text-purple-800',
+      MX: 'bg-green-100 text-green-800',
+      TXT: 'bg-yellow-100 text-yellow-800',
+      NS: 'bg-red-100 text-red-800',
+      SOA: 'bg-indigo-100 text-indigo-800',
+      CNAME: 'bg-pink-100 text-pink-800'
+    }
+    return colors[type] || 'bg-gray-100 text-gray-800'
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-4xl mx-auto">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold">DNS Lookup Tool</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="domain" className="block mb-2">
+                  Domain Name
+                </Label>
+                <div className="flex space-x-2">
+                  <Input
+                    id="domain"
+                    placeholder="example.com"
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && fetchDnsRecords()}
+                  />
+                  <Button onClick={fetchDnsRecords} disabled={isLoading}>
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Looking Up
+                      </>
+                    ) : (
+                      'Lookup'
+                    )}
+                  </Button>
+                </div>
+                {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+                <p className="mt-1 text-sm text-gray-500">
+                  Enter a domain name (e.g., google.com)
+                </p>
+              </div>
+
+              {records.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-medium mb-4">
+                    DNS Records for {searchedDomain}
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Type
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Value
+                          </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            TTL
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {records.map((record, index) => (
+                          <tr key={index}>
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <span
+                                className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getRecordColor(
+                                  record.type
+                                )}`}
+                              >
+                                {record.type}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 whitespace-pre-wrap text-sm text-gray-900 font-mono">
+                              {record.value}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {record.ttl || 'N/A'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
